@@ -1,19 +1,24 @@
 package cmpe273;
 
 import java.text.DateFormat;
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
 import javax.validation.Valid;
 
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,14 +35,12 @@ public class UserController {
 	private static final Map<String, Map<String, BankAccount>> bankInfo = new HashMap<String, Map<String, BankAccount>>();
 
 	Random random = new Random();
-
 	DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-	// Date date = new Date();
 	Calendar calobj = Calendar.getInstance();
 	Gson gson = new Gson();
 
 	// create user using POST
-	@RequestMapping(value = "api/v1/users/create", method = RequestMethod.POST)
+	@RequestMapping(value = "api/v1/users", method = RequestMethod.POST)
 	public ResponseEntity<String> createUser(@Valid @RequestBody User user,
 			BindingResult result) {
 
@@ -45,10 +48,10 @@ public class UserController {
 			return new ResponseEntity<String>(HttpStatus.BAD_REQUEST);
 		}
 
-		// int number = random.nextInt(1000);
 		user.setUserId("u-" + random.nextInt(1000));
-
-		user.setCreated_at(dateFormat.format(calobj.getTime()));
+		String currentDate = dateFormat.format(calobj.getTime());
+		user.setCreated_at(currentDate);
+		user.setUpdated_at(currentDate);
 		userInfo.put(user.getUserId(), user);
 
 		JsonObject jObject = new JsonObject();
@@ -63,18 +66,56 @@ public class UserController {
 	}
 
 	// view user details using GET
+	// Last-Modified and If-Modified-Since using Conditional Get
 
+	@Cacheable(value = "api/v1/users", key = "{user_id}")
 	@RequestMapping(value = "api/v1/users/{user_id}", method = RequestMethod.GET)
-	public ResponseEntity<String> viewUser(@PathVariable String user_id) {
+	public ResponseEntity<String> viewUser(
+			@PathVariable String user_id,
+			@RequestHeader(value = "If-Modified-Since", defaultValue = "") String ifModifiedSince) {
+		Date ifModifiedSinceDate = null;
 
-		User user = userInfo.get(user_id);
+		if (ifModifiedSince != null && !ifModifiedSince.isEmpty()) {
+			try {
+				ifModifiedSinceDate = dateFormat.parse(ifModifiedSince);
+			} catch (ParseException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
 
-		JsonObject jObject = new JsonObject();
-		jObject.addProperty("user_id", user.getUserId());
-		jObject.addProperty("email", user.getEmail());
-		jObject.addProperty("password", user.getPassword());
-		jObject.addProperty("created_at", user.getCreated_at());
-		return new ResponseEntity<String>(gson.toJson(jObject), HttpStatus.OK);
+		String updatedAt = userInfo.get(user_id).getUpdated_at();
+
+		Date updatedAtDate = null;
+
+		if (updatedAt != null && !updatedAt.isEmpty()) {
+			try {
+				updatedAtDate = dateFormat.parse(updatedAt);
+			} catch (ParseException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+
+		HttpHeaders headers = new HttpHeaders();
+
+		headers.set("Last-Modified", userInfo.get(user_id).getUpdated_at());
+
+		if (ifModifiedSinceDate == null
+				|| ifModifiedSinceDate.compareTo(updatedAtDate) < 0) {
+			User user = userInfo.get(user_id);
+
+			JsonObject jObject = new JsonObject();
+			jObject.addProperty("user_id", user.getUserId());
+			jObject.addProperty("email", user.getEmail());
+			jObject.addProperty("password", user.getPassword());
+			jObject.addProperty("created_at", user.getCreated_at());
+			return new ResponseEntity<String>(gson.toJson(jObject), headers,
+					HttpStatus.OK);
+
+		} else {
+			return new ResponseEntity<String>(headers, HttpStatus.NOT_MODIFIED);
+		}
 
 	}
 

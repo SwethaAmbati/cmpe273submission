@@ -13,7 +13,7 @@ public class User {
 
 	private String user_id;
 	private String created_at;
-	private String updated_at;
+	private String updated_at;;
 
 	public User() {
 
